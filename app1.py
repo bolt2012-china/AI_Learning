@@ -21,9 +21,9 @@ from zhipuai import ZhipuAI # 做rag
 from dotenv import load_dotenv
 
 import multi_model
-
-multi_input = multi_model.upload_file()
-print(multi_input[0])
+from flask import Flask, redirect, url_for, render_template, request, flash
+import cv2
+import pytesseract
 
 load_dotenv()
 
@@ -76,6 +76,43 @@ def printer(text, level):
         print(text)
 
 
+app = Flask(__name__)
+app.config['SECRET_KEY'] = '123456'
+
+def integrate_upload_function():
+    if request.method == 'POST':
+        # Get uploaded file
+        file = request.files['file']
+
+        # Check if file is allowed
+        if file and multi_model.allowed_file(file.filename):
+            filename = multi_model.secure_filename(file.filename)
+            if filename != file.filename:
+                flash("only support ASCII name")
+                return render_template('upload.html')
+
+            # Save file
+            try:
+                file.save(os.path.join(multi_model.UPLOAD_FOLDER, filename))
+            except FileNotFoundError:
+                os.mkdir(multi_model.UPLOAD_FOLDER)
+                file.save(os.path.join(multi_model.UPLOAD_FOLDER, filename))
+
+            # Read and process the image
+            image = cv2.imread(os.path.join(multi_model.UPLOAD_FOLDER, filename))
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            text = pytesseract.image_to_string(gray_image, config='--psm 6')
+
+            return redirect(url_for('upload_file', fileName=filename))
+        else:
+            return 'Upload Failed'
+    else:  # GET method
+        return render_template('upload.html')
+
+
+@app.route('/upload', methods=['GET', 'POST'])
+def upload_file():
+    return integrate_upload_function()
 
 
 class UserInputManager:
@@ -151,9 +188,6 @@ class TextInputManager:
         while self.running:
             try:
                 # 使用aioconsole实现非阻塞输入
-                # if multi_model.upload_file():
-                #     text = multi_model.upload_file()[1]
-                # else:
                 text = await ainput("")
                 await self.input_queue.put(text.strip())
                 print(f"[文本输入接收] 已收到输入: {text}")  # 调试日志
@@ -300,7 +334,6 @@ def to_audio_generator(bedrock_stream):
 
 
 class ZhipuKnowledgeManager:
-
 
     def __init__(self):
         self.api_key = self._get_zhipu_secret()  # 从AWS Secrets Manager获取
@@ -868,7 +901,7 @@ if __name__ == "__main__":
     - 输入 exit 回车可退出
     *************************************************************
     """)
-
+    app.run(host='0.0.0.0', port=1234, debug=True)
     try:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(main())
